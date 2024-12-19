@@ -1,306 +1,311 @@
-// 在文件开头添加错误处理
-window.onerror = function(msg, url, lineNo, columnNo, error) {
-    console.error('Error: ' + msg + '\nURL: ' + url + '\nLine: ' + lineNo + '\nColumn: ' + columnNo + '\nError object: ' + JSON.stringify(error));
-    alert('抱歉，发生了错误。请查看控制台获取详细信息。');
-    return false;
-};
-
-// 在页面加载完成后检查环境
-window.onload = function() {
-    // 检查文件是否正确加载
-    if (!document.querySelector('.upload-container')) {
-        alert('警告：页面元素未正确加载。请确保所有文件路径正确。');
-        return;
-    }
-
-    // 添加加载成功提示
-    console.log('页面已成功加载');
-};
-
-// 获取DOM元素
-const uploadArea = document.getElementById('uploadArea');
-const fileInput = document.getElementById('fileInput');
-const compressionControls = document.getElementById('compressionControls');
-const previewContainer = document.getElementById('previewContainer');
-const downloadContainer = document.getElementById('downloadContainer');
-const originalPreview = document.getElementById('originalPreview');
-const compressedPreview = document.getElementById('compressedPreview');
-const originalSize = document.getElementById('originalSize');
-const compressedSize = document.getElementById('compressedSize');
+// 声明全局变量
+let originalFile = null;
 const compressionRatio = document.getElementById('compressionRatio');
-const ratioValue = document.getElementById('ratioValue');
+const compressedPreview = document.getElementById('compressedPreview');
+const compressedSize = document.getElementById('compressedSize');
 const downloadBtn = document.getElementById('downloadBtn');
 
-let originalFile = null;
-
-// 处理拖拽上传
-uploadArea.addEventListener('dragover', (e) => {
-    e.preventDefault();
-    uploadArea.style.borderColor = '#007AFF';
-});
-
-uploadArea.addEventListener('dragleave', (e) => {
-    e.preventDefault();
-    uploadArea.style.borderColor = '#ddd';
-});
-
-uploadArea.addEventListener('drop', (e) => {
-    e.preventDefault();
-    uploadArea.style.borderColor = '#ddd';
-    const file = e.dataTransfer.files[0];
-    if (isValidImage(file)) {
-        handleImageUpload(file);
-    }
-});
-
-// 处理点击上传
-uploadArea.addEventListener('click', () => {
-    fileInput.click();
-});
-
-fileInput.addEventListener('change', (e) => {
-    const file = e.target.files[0];
-    if (isValidImage(file)) {
-        handleImageUpload(file);
-    }
-});
-
-// 验证图片格式
-function isValidImage(file) {
-    const validTypes = ['image/jpeg', 'image/png'];
-    if (!validTypes.includes(file.type)) {
-        alert('请上传 PNG 或 JPG 格式的图片！');
-        return false;
-    }
-    return true;
+// 修改压缩质量计算函数
+function calculateQuality(targetRatio) {
+    // 直接使用线性映射，确保压缩比例和质量直接对应
+    return Math.max(0.05, targetRatio / 100);
 }
 
-// 处理图片上传
-function handleImageUpload(file) {
-    originalFile = file;
-    
-    // 显示原始图片预览
-    const reader = new FileReader();
-    reader.onload = (e) => {
-        originalPreview.src = e.target.result;
-        originalSize.textContent = formatFileSize(file.size);
-        
-        // 显示控制区域和预览区域
-        compressionControls.style.display = 'block';
-        previewContainer.style.display = 'grid';
-        downloadContainer.style.display = 'block';
-        
-        // 压缩图片
-        compressImage();
-    };
-    reader.readAsDataURL(file);
-}
+// 修改压缩图片处理逻辑
+async function compressImage() {
+    if (!originalFile) return;
 
-// 压缩图片
-function compressImage() {
     // 显示加载状态
     compressedPreview.style.opacity = '0.5';
     compressedSize.textContent = '压缩中...';
     
     const targetRatio = parseInt(compressionRatio.value);
-    const isPNG = originalFile.type === 'image/png';
     
-    // 仅在100%时使用原图
+    // 如果是100%质量，直接使用原图
     if (targetRatio === 100) {
-        console.log('使用原图（100%质量）');
-        compressedPreview.src = originalPreview.src;
+        const originalUrl = URL.createObjectURL(originalFile);
+        compressedPreview.src = originalUrl;
         compressedSize.textContent = `${formatFileSize(originalFile.size)} (100%)`;
         compressedPreview.style.opacity = '1';
         
         downloadBtn.onclick = () => {
             const link = document.createElement('a');
-            link.href = URL.createObjectURL(originalFile);
+            link.href = originalUrl;
             link.download = originalFile.name;
             link.click();
         };
         return;
     }
     
-    console.log('开始压缩：', {
-        目标压缩比: targetRatio + '%',
-        原始大小: formatFileSize(originalFile.size),
-        文件类型: originalFile.type
-    });
-    
-    const img = new Image();
-    
-    img.onload = () => {
-        try {
-            const canvas = document.createElement('canvas');
-            const ctx = canvas.getContext('2d');
+    try {
+        // 创建图片对象并等待加载完成
+        const img = await new Promise((resolve, reject) => {
+            const img = new Image();
+            img.onload = () => resolve(img);
+            img.onerror = reject;
+            img.src = URL.createObjectURL(originalFile);
+        });
+        
+        // 创建canvas并绘制图片
+        const canvas = document.createElement('canvas');
+        canvas.width = img.width;
+        canvas.height = img.height;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, img.width, img.height);
+        
+        // 计算目标文件大小
+        const targetSize = originalFile.size * (targetRatio / 100);
+        
+        // 根据目标比例调整质量范围和误差容忍度
+        let minQuality, maxQuality, errorTolerance;
+        
+        if (targetRatio > 50) {
+            // 51-100%使用更精确的质量范围
+            minQuality = (targetRatio - 10) / 100; // 比目标低10%开始
+            maxQuality = Math.min(1.0, (targetRatio + 10) / 100); // 比目标高10%结束
+            errorTolerance = 0.01; // 1%的误差容忍度
+        } else {
+            // 1-50%使用原来的范围
+            minQuality = 0.01;
+            maxQuality = 0.5;
+            errorTolerance = 0.02; // 2%的误差容忍度
+        }
+        
+        let bestBlob = null;
+        let bestQuality = null;
+        let attempts = 0;
+        const maxAttempts = targetRatio > 50 ? 10 : 8; // 高比例时多尝试几次
+        
+        while (attempts < maxAttempts) {
+            attempts++;
+            const quality = (minQuality + maxQuality) / 2;
             
-            // 计算新尺寸
-            let { width, height } = calculateNewDimensions(
-                img.width, 
-                img.height, 
-                targetRatio
-            );
-            
-            canvas.width = width;
-            canvas.height = height;
-            
-            // 使用高质量的缩放
-            ctx.imageSmoothingEnabled = true;
-            ctx.imageSmoothingQuality = 'high';
-            
-            ctx.drawImage(img, 0, 0, width, height);
-            
-            // 计算压缩质量
-            const quality = calculateQuality(targetRatio);
-            
-            console.log('压缩参数：', {
-                目标压缩比: targetRatio + '%',
-                尺寸压缩比: ((width * height) / (img.width * img.height) * 100).toFixed(1) + '%',
-                质量设置: (quality * 100).toFixed(1) + '%',
-                调整后尺寸: `${width}x${height}`,
-                原始尺寸: `${img.width}x${img.height}`
+            // 尝试当前质量值
+            const blob = await new Promise(resolve => {
+                canvas.toBlob(resolve, 'image/jpeg', quality);
             });
             
-            canvas.toBlob(
-                (blob) => {
-                    if (!blob) {
-                        throw new Error('压缩失败');
-                    }
-                    
-                    const ratio = (blob.size / originalFile.size * 100).toFixed(2);
-                    console.log('压缩结果：', {
-                        原始大小: formatFileSize(originalFile.size),
-                        压缩后大小: formatFileSize(blob.size),
-                        压缩比例: ratio + '%'
-                    });
-                    
-                    compressedPreview.src = URL.createObjectURL(blob);
-                    compressedSize.textContent = `${formatFileSize(blob.size)} (${ratio}%)`;
-                    
-                    // 更新下载按钮
-                    downloadBtn.onclick = () => {
-                        const link = document.createElement('a');
-                        link.href = URL.createObjectURL(blob);
-                        link.download = `compressed_${originalFile.name}`;
-                        link.click();
-                    };
-                    
-                    compressedPreview.style.opacity = '1';
-                },
-                originalFile.type,
-                quality
-            );
+            if (!blob) continue;
             
-        } catch (error) {
-            console.error('压缩失败:', error);
-            compressedSize.textContent = '压缩失败: ' + error.message;
+            const ratio = blob.size / originalFile.size;
+            console.log(`尝试 #${attempts}: quality=${quality.toFixed(3)}, ratio=${(ratio * 100).toFixed(1)}%`);
+            
+            // 更新最佳结果
+            if (!bestBlob || Math.abs(blob.size - targetSize) < Math.abs(bestBlob.size - targetSize)) {
+                bestBlob = blob;
+                bestQuality = quality;
+            }
+            
+            // 如果已经足够接近目标大小，就停止尝试
+            if (Math.abs(ratio - targetRatio / 100) < errorTolerance) {
+                break;
+            }
+            
+            // 调整质量范围
+            if (blob.size > targetSize) {
+                maxQuality = quality;
+            } else {
+                minQuality = quality;
+            }
         }
-    };
-    
-    img.src = originalPreview.src;
-}
-
-// 计算的尺寸
-function calculateNewDimensions(originalWidth, originalHeight, targetRatio) {
-    // 基础最大尺寸限制
-    const MAX_SIZE = 4096;
-    let width = originalWidth;
-    let height = originalHeight;
-    
-    // 如果原始尺寸超过最大限制，先进行等比缩放
-    if (width > MAX_SIZE || height > MAX_SIZE) {
-        const ratio = Math.min(MAX_SIZE / width, MAX_SIZE / height);
-        width = Math.floor(width * ratio);
-        height = Math.floor(height * ratio);
-    }
-    
-    // 使用线性比例计算缩放
-    const scale = 0.3 + (targetRatio / 100) * 0.7;
-    
-    // 计算新尺寸，确保最小尺寸
-    width = Math.max(50, Math.floor(width * scale));
-    height = Math.max(50, Math.floor(height * scale));
-    
-    console.log('尺寸计算：', {
-        原始尺寸: `${originalWidth}x${originalHeight}`,
-        目标比例: targetRatio + '%',
-        缩放比例: (scale * 100).toFixed(1) + '%',
-        最终尺寸: `${width}x${height}`
-    });
-    
-    return { width, height };
-}
-
-// 修改压缩质量计算函数,使压缩更线性平滑
-function calculateQuality(targetRatio) {
-    // 将压缩比例直接映射到0.3-1.0的质量区间
-    const quality = 0.3 + (targetRatio / 100) * 0.7;
-    
-    console.log('质量计算：', {
-        目标比例: targetRatio + '%',
-        实际质量: (quality * 100).toFixed(1) + '%'
-    });
-    
-    return quality;
-}
-
-// 检查图片是否包含透明像素
-function hasTransparency(ctx, width, height) {
-    const imageData = ctx.getImageData(0, 0, width, height).data;
-    for (let i = 3; i < imageData.length; i += 4) {
-        if (imageData[i] < 255) {
-            return true;
+        
+        if (!bestBlob) {
+            throw new Error('压缩失败');
         }
+        
+        console.log('最终结果：', {
+            目标比例: targetRatio + '%',
+            目标大小: formatFileSize(targetSize),
+            实际大小: formatFileSize(bestBlob.size),
+            实际比例: ((bestBlob.size / originalFile.size) * 100).toFixed(1) + '%',
+            质量: (bestQuality * 100).toFixed(1) + '%'
+        });
+        
+        handleCompressedBlob(bestBlob, targetRatio);
+        
+    } catch (error) {
+        console.error('图片处理出错：', error);
+        compressedSize.textContent = '压缩失败';
+        compressedPreview.style.opacity = '1';
     }
-    return false;
 }
 
-// 处理压缩后的图片
-function handleCompressedImage(blob, note = '') {
+// PNG压缩函数
+function compressAsPNG(canvas, targetRatio) {
+    // PNG转换为JPEG进行压缩以获得更精确的控制
+    compressAsJPEG(canvas, targetRatio);
+}
+
+// 将PNG转换为JPEG进行压缩
+function compressPNGAsJPEG(canvas, targetRatio) {
+    compressAsJPEG(canvas, targetRatio);
+}
+
+// JPEG压缩函数
+async function compressAsJPEG(canvas, targetRatio) {
+    // 直接使用目标比例作为质量值
+    const quality = targetRatio / 100;
+    
+    // 显示压缩状态
+    compressedSize.textContent = '压缩中...';
+    
+    try {
+        // 进行压缩
+        const blob = await new Promise(resolve => {
+            canvas.toBlob(resolve, 'image/jpeg', quality);
+        });
+        
+        if (!blob) {
+            throw new Error('压缩失败');
+        }
+        
+        // 如果压缩后比原图大，使用原图
+        if (blob.size >= originalFile.size) {
+            handleCompressedBlob(originalFile);
+            return;
+        }
+        
+        console.log('压缩结果：', {
+            质量: (quality * 100).toFixed(1) + '%',
+            原始大小: formatFileSize(originalFile.size),
+            压缩后大小: formatFileSize(blob.size),
+            压缩比例: ((blob.size / originalFile.size) * 100).toFixed(1) + '%'
+        });
+        
+        handleCompressedBlob(blob);
+    } catch (error) {
+        console.error('压缩出错：', error);
+        handleCompressedBlob(originalFile);
+    }
+}
+
+// 修改处理压缩后的blob函数
+function handleCompressedBlob(blob, targetRatio = 100) {
+    const isOriginal = blob === originalFile;
+    const size = formatFileSize(blob.size);
+    const ratio = isOriginal ? 100 : targetRatio;
+    
+    // 显示压缩后的图片
+    compressedPreview.src = URL.createObjectURL(blob);
+    compressedSize.textContent = `${size} (${ratio}%)`;
     compressedPreview.style.opacity = '1';
-    const ratio = (blob.size / originalFile.size * 100).toFixed(2);
-    const compressedUrl = URL.createObjectURL(blob);
-    
-    console.log('压缩结果：', {
-        原始大小: formatFileSize(originalFile.size),
-        压缩后大小: formatFileSize(blob.size),
-        压缩比例: ratio + '%',
-        备注: note
-    });
-    
-    // 更新预览
-    compressedPreview.src = compressedUrl;
-    compressedSize.textContent = `${formatFileSize(blob.size)} (${ratio}%) ${note}`;
     
     // 更新下载按钮
     downloadBtn.onclick = () => {
         const link = document.createElement('a');
-        link.href = compressedUrl;
-        const ext = blob.type === 'image/jpeg' ? '.jpg' : '.png';
-        link.download = `compressed_${originalFile.name.replace(/\.[^/.]+$/, '')}${ext}`;
+        link.href = URL.createObjectURL(blob);
+        if (isOriginal) {
+            link.download = originalFile.name;
+        } else {
+            const extension = '.jpg';
+            link.download = `compressed_${originalFile.name.replace(/\.[^/.]+$/, '')}${extension}`;
+        }
         link.click();
     };
 }
 
-// 格式化文件大小
-function formatFileSize(bytes) {
-    if (bytes === 0) return '0 Bytes';
-    const k = 1024;
-    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+// 修改压缩比例滑块变化事件
+compressionRatio.addEventListener('input', () => {
+    const targetRatio = parseInt(compressionRatio.value);
+    document.getElementById('ratioValue').textContent = targetRatio;
+    
+    if (originalFile) {
+        // 使用防抖，避免频繁压缩
+        clearTimeout(compressionRatio.timeout);
+        compressionRatio.timeout = setTimeout(() => {
+            if (targetRatio === 100) {
+                // 100%时直接使用原图
+                const originalUrl = URL.createObjectURL(originalFile);
+                compressedPreview.src = originalUrl;
+                compressedSize.textContent = `${formatFileSize(originalFile.size)} (100%)`;
+                compressedPreview.style.opacity = '1';
+                
+                downloadBtn.onclick = () => {
+                    const link = document.createElement('a');
+                    link.href = originalUrl;
+                    link.download = originalFile.name;
+                    link.click();
+                };
+            } else {
+                // 非100%时进行压缩
+                compressImage();
+            }
+        }, 300); // 300ms的防抖延迟
+    }
+});
+
+// 获取DOM元素
+const fileInput = document.getElementById('fileInput');
+const uploadArea = document.getElementById('uploadArea');
+const originalPreview = document.getElementById('originalPreview');
+const originalSize = document.getElementById('originalSize');
+const compressionControls = document.getElementById('compressionControls');
+const previewContainer = document.getElementById('previewContainer');
+const downloadContainer = document.getElementById('downloadContainer');
+
+// 文件上传处理函数
+function handleFileSelect(file) {
+    if (!file || !file.type.match('image.*')) {
+        alert('请选择图片文件！');
+        return;
+    }
+    
+    originalFile = file;
+    
+    // 显示原图预览
+    const originalUrl = URL.createObjectURL(file);
+    originalPreview.src = originalUrl;
+    originalSize.textContent = formatFileSize(file.size);
+    
+    // 显示压缩控制和预览区域
+    compressionControls.style.display = 'block';
+    previewContainer.style.display = 'grid';
+    downloadContainer.style.display = 'block';
+    
+    // 初始显示100%质量的原图
+    compressedPreview.src = originalUrl;
+    // 传入100%作为目标比例
+    handleCompressedBlob(file, 100);
 }
 
-// 监听压缩比例变化
-compressionRatio.addEventListener('input', (e) => {
-    const value = e.target.value;
-    // 添加质量说明
-    if (value === '100') {
-        ratioValue.textContent = value + ' (最高质量)';
-    } else if (value === '1') {
-        ratioValue.textContent = value + ' (最低质量)';
-    } else {
-        ratioValue.textContent = value;
-    }
-    compressImage();
-}); 
+// 文件输入框变化事件
+fileInput.addEventListener('change', (e) => {
+    const file = e.target.files[0];
+    handleFileSelect(file);
+});
+
+// 点击上传区域触发文件选择
+uploadArea.addEventListener('click', () => {
+    fileInput.click();
+});
+
+// 拖拽事件处理
+uploadArea.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    uploadArea.style.borderColor = '#007AFF';
+});
+
+uploadArea.addEventListener('dragleave', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    uploadArea.style.borderColor = '#ddd';
+});
+
+uploadArea.addEventListener('drop', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    uploadArea.style.borderColor = '#ddd';
+    
+    const file = e.dataTransfer.files[0];
+    handleFileSelect(file);
+});
+
+// 格式化文件大小的辅助函数
+function formatFileSize(bytes) {
+    if (bytes === 0) return '0 B';
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return (bytes / Math.pow(k, i)).toFixed(2) + ' ' + sizes[i];
+}
