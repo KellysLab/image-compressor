@@ -228,21 +228,4 @@ input[type="range"]::-moz-range-thumb {
 
 input[type="range"]::-moz-range-thumb:hover {
     background: #0056b3;
-}
-
-/* 添加测试按钮样式 */
-#testButton {
-    background-color: #28a745;
-    color: white;
-    border: none;
-    padding: 8px 16px;
-    border-radius: 4px;
-    cursor: pointer;
-    margin-left: 10px;
-    font-size: 0.9em;
-    transition: background-color 0.3s ease;
-}
-
-#testButton:hover {
-    background-color: #218838;
 } 
