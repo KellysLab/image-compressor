@@ -303,25 +303,4 @@ compressionRatio.addEventListener('input', (e) => {
         ratioValue.textContent = value;
     }
     compressImage();
-});
-
-// 添加一个试按钮
-const testButton = document.createElement('button');
-testButton.textContent = '测试压缩效果';
-testButton.style.cssText = 'margin: 10px; padding: 5px 10px;';
-downloadContainer.appendChild(testButton);
-
-testButton.onclick = () => {
-    console.clear(); // 清除之前的日志
-    console.log('开始压缩测试...');
-    
-    // 测试不同的压缩比例
-    [100, 80, 60, 40, 20].forEach((value, index) => {
-        setTimeout(() => {
-            console.log(`\n测试压缩比例: ${value}%`);
-            compressionRatio.value = value;
-            ratioValue.textContent = value;
-            compressImage();
-        }, index * 1500);
-    });
-}; 
+}); 
