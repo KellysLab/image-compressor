@@ -228,4 +228,17 @@ input[type="range"]::-moz-range-thumb {
 
 input[type="range"]::-moz-range-thumb:hover {
     background: #0056b3;
+}
+
+/* 免责声明样式 */
+.disclaimer {
+    margin-top: 40px;
+    text-align: center;
+    padding: 20px;
+    border-top: 1px solid #eee;
+}
+
+.disclaimer p {
+    color: #666;
+    font-size: 0.9em;
 } 
